@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>理想気体 PVシミュレーター</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center p-4">
+<h1 class="text-xl font-bold mb-1 text-center">🔬 理想気体 PV図シミュレーター</h1>
+<p class="text-gray-400 text-sm mb-4 text-center">PV=nRT — パラメータを変えてPV線図を探索</p>
+
+<div class="w-full max-w-3xl">
+  <div class="bg-gray-800 rounded-xl p-4 mb-4">
+    <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <label class="flex flex-col text-xs text-gray-400">
+        物質量 n (mol)
+        <input id="n" type="range" min="0.1" max="5" step="0.1" value="1" class="mt-2">
+        <span id="nVal" class="text-blue-300 font-mono text-sm">1.0 mol</span>
+      </label>
+      <label class="flex flex-col text-xs text-gray-400">
+        温度 T (K)
+        <input id="T" type="range" min="100" max="1000" step="10" value="300" class="mt-2">
+        <span id="TVal" class="text-red-300 font-mono text-sm">300 K</span>
+      </label>
+      <label class="flex flex-col text-xs text-gray-400">
+        体積 V (L)
+        <input id="V" type="range" min="1" max="100" step="1" value="20" class="mt-2">
+        <span id="VVal" class="text-green-300 font-mono text-sm">20 L</span>
+      </label>
+      <div class="flex flex-col text-xs text-gray-400">
+        計算値
+        <div class="mt-2 bg-gray-700 rounded p-2 text-sm">
+          P = <span id="Pval" class="text-yellow-400 font-bold font-mono">-</span> kPa<br>
+          <span class="text-gray-500">R = 8.314 J/mol·K</span>
+        </div>
+      </div>
+    </div>
+    <div class="mt-3 flex gap-4 flex-wrap">
+      <button id="addIsotherm" class="bg-blue-700 hover:bg-blue-600 px-3 py-1.5 rounded text-sm transition">📈 等温線を追加</button>
+      <button id="clearIsotherms" class="bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded text-sm transition">クリア</button>
+      <label class="flex items-center gap-2 text-xs text-gray-400">
+        <input type="checkbox" id="showAdiabat"> 断熱線（γ=1.4）
+      </label>
+    </div>
+  </div>
+
+  <div class="bg-gray-800 rounded-xl p-4 mb-4">
+    <div class="text-xs text-gray-400 mb-2">P–V 線図</div>
+    <canvas id="pvplot" height="300" class="w-full rounded"></canvas>
+  </div>
+
+  <div class="bg-gray-800 rounded-xl p-3">
+    <div class="text-xs font-bold text-gray-300 mb-2">追加済み等温線</div>
+    <div id="isothermList" class="text-xs text-gray-400 flex flex-wrap gap-3"></div>
+  </div>
+</div>
+
+<script>
+const R=8.314; // J/mol·K
+let isotherms=[]; // {n,T,color}
+const ICOLORS=['#60a5fa','#34d399','#f97316','#a78bfa','#fb7185','#fbbf24'];
+let colorIdx=0;
+
+function getParams(){
+  const n=parseFloat(document.getElementById('n').value);
+  const T=parseFloat(document.getElementById('T').value);
+  const V=parseFloat(document.getElementById('V').value);
+  return {n,T,V};
+}
+
+function update(){
+  const {n,T,V}=getParams();
+  document.getElementById('nVal').textContent=n.toFixed(1)+' mol';
+  document.getElementById('TVal').textContent=T.toFixed(0)+' K';
+  document.getElementById('VVal').textContent=V.toFixed(0)+' L';
+  // P = nRT/V  (V in L = 1e-3 m³)
+  const P=(n*R*T)/(V*1e-3)/1000; // kPa
+  document.getElementById('Pval').textContent=P.toFixed(1);
+  drawPV();
+}
+
+function drawPV(){
+  const cv=document.getElementById('pvplot');
+  const W=cv.offsetWidth||600; cv.width=W; cv.height=300;
+  const ctx=cv.getContext('2d');
+  ctx.fillStyle='#111827'; ctx.fillRect(0,0,W,300);
+  const pad={l:50,r:15,t:15,b:40};
+  const pw=W-pad.l-pad.r, ph=300-pad.t-pad.b;
+  const Vmin=1,Vmax=100; // L
+  const Pmin=0,Pmax=2000; // kPa
+  const toX=v=>pad.l+pw*(v-Vmin)/(Vmax-Vmin);
+  const toY=p=>pad.t+ph*(1-(p-Pmin)/(Pmax-Pmin));
+
+  // Grid
+  ctx.strokeStyle='#374151'; ctx.lineWidth=1;
+  for(let v=0;v<=100;v+=20){
+    ctx.beginPath(); ctx.moveTo(toX(v),pad.t); ctx.lineTo(toX(v),pad.t+ph); ctx.stroke();
+    ctx.fillStyle='#6b7280'; ctx.font='10px monospace'; ctx.textAlign='center';
+    ctx.fillText(v+'L',toX(v),pad.t+ph+15);
+  }
+  for(let p=0;p<=2000;p+=500){
+    ctx.beginPath(); ctx.moveTo(pad.l,toY(p)); ctx.lineTo(pad.l+pw,toY(p)); ctx.stroke();
+    ctx.fillStyle='#6b7280'; ctx.font='10px monospace'; ctx.textAlign='right';
+    ctx.fillText(p,pad.l-5,toY(p)+3);
+  }
+  ctx.fillStyle='#9ca3af'; ctx.font='11px sans-serif';
+  ctx.textAlign='center'; ctx.fillText('V (L)',pad.l+pw/2,298);
+  ctx.save(); ctx.translate(12,pad.t+ph/2); ctx.rotate(-Math.PI/2);
+  ctx.fillText('P (kPa)',0,0); ctx.restore();
+
+  // Isotherms
+  for(const iso of isotherms){
+    ctx.strokeStyle=iso.color; ctx.lineWidth=2; ctx.beginPath();
+    let first=true;
+    for(let vi=1;vi<=100;vi+=0.5){
+      const P=(iso.n*R*iso.T)/(vi*1e-3)/1000;
+      if(P>Pmax||P<Pmin) continue;
+      const x=toX(vi), y=toY(P);
+      first?ctx.moveTo(x,y):ctx.lineTo(x,y); first=false;
+    }
+    ctx.stroke();
+    ctx.fillStyle=iso.color; ctx.font='10px sans-serif'; ctx.textAlign='left';
+    ctx.fillText(`T=${iso.T}K`,toX(2),toY((iso.n*R*iso.T)/(2e-3)/1000)+3);
+  }
+
+  // Current isotherm (dashed)
+  const {n,T,V}=getParams();
+  ctx.strokeStyle='#fbbf24'; ctx.lineWidth=2; ctx.setLineDash([5,4]); ctx.beginPath();
+  let first2=true;
+  for(let vi=1;vi<=100;vi+=0.5){
+    const P=(n*R*T)/(vi*1e-3)/1000;
+    if(P>Pmax||P<Pmin) continue;
+    const x=toX(vi), y=toY(P);
+    first2?ctx.moveTo(x,y):ctx.lineTo(x,y); first2=false;
+  }
+  ctx.stroke(); ctx.setLineDash([]);
+
+  // Adiabat (γ=1.4): PVγ = const
+  if(document.getElementById('showAdiabat').checked){
+    const P0=(n*R*T)/(V*1e-3)/1000;
+    const gamma=1.4;
+    const K=P0*Math.pow(V,gamma);
+    ctx.strokeStyle='#f87171'; ctx.lineWidth=1.5; ctx.setLineDash([3,3]); ctx.beginPath();
+    let f3=true;
+    for(let vi=1;vi<=100;vi+=0.5){
+      const P=K/Math.pow(vi,gamma);
+      if(P>Pmax||P<Pmin||P<0) continue;
+      const x=toX(vi), y=toY(P);
+      f3?ctx.moveTo(x,y):ctx.lineTo(x,y); f3=false;
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  // Current point
+  const P0=(n*R*T)/(V*1e-3)/1000;
+  if(P0<=Pmax&&P0>=Pmin){
+    ctx.fillStyle='#fbbf24'; ctx.beginPath(); ctx.arc(toX(V),toY(P0),6,0,Math.PI*2); ctx.fill();
+  }
+}
+
+document.getElementById('addIsotherm').addEventListener('click',()=>{
+  const {n,T}=getParams();
+  isotherms.push({n,T,color:ICOLORS[colorIdx%ICOLORS.length]});
+  colorIdx++;
+  const list=document.getElementById('isothermList');
+  list.innerHTML=isotherms.map((iso,i)=>`<span style="color:${iso.color}">T=${iso.T}K n=${iso.n}mol</span>`).join(' | ');
+  drawPV();
+});
+document.getElementById('clearIsotherms').addEventListener('click',()=>{ isotherms=[]; colorIdx=0; document.getElementById('isothermList').innerHTML=''; drawPV(); });
+['n','T','V'].forEach(id=>document.getElementById(id).addEventListener('input',update));
+document.getElementById('showAdiabat').addEventListener('change',drawPV);
+window.addEventListener('resize',drawPV);
+update();
+</script>
+</body>
+</html>
